@@ -1,0 +1,16 @@
+<?php
+/**
+ * @file
+ * Install, update, and uninstall functions for the weixin module.
+ */
+
+/**
+ * Implements hook_uninstall().
+ */
+function weixin_uninstall() {
+  variable_del('weixintest_token');
+  variable_del('weixintest_greeting');
+  variable_del('weixintest_noresult');
+  variable_del('weixintest_noindentify');
+  variable_del('weixintest_node_types');
+}

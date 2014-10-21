@@ -1,0 +1,190 @@
+<?php
+/**
+ * Implements hook_permission().
+ */
+function weixintest_permission() {
+  return array(
+    'administer weixintest' => array(
+      'title' => '管理微信',
+      'description' => '微信公众平台配置权限',
+    ),
+  );
+}
+
+/**
+ * Implements hook_menu().
+ */
+function weixintest_menu() {
+  $items = array();
+  $items['weixintest'] = array(
+    'title' => '微信API',
+    'page callback' => 'weixintest_api_callback',
+    'access callback' => TRUE,
+  );
+  $items['admin/settings/weixintest'] = array(
+    'title' => '微信',
+    'description' => '配置微信公众平台',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('weixintest_info_setting'),
+    'access arguments' => array('administer weixintest'),
+    'file' => 'weixintest.inc',
+  );
+  $items['admin/settings/searchtest'] = array(
+    'title' => '搜索测试',
+    'description' => '测试搜索结果',
+	'page callback' => 'drupal_get_form',
+    'page arguments' => array('searchtest_info_setting'),
+    'access arguments' => array('administer weixintest'),
+    'file' => 'searchtest.inc',
+  );
+  return $items;
+}
+
+/**
+ * 微信回调页面
+ */
+function weixintest_api_callback() {
+  //drupal7中使用 $query = drupal_get_query_parameters();drupal6使用$query = $_GET;
+  $query = $_GET;
+  if (checkSignature($query)) {
+    //首次调用验证成为开发者
+    if (isset($query['echostr'])) {
+      echo $query['echostr'];
+      exit;
+    }
+    //回应信息
+    responseMsg();
+  }
+}
+
+/**
+ * 验证信息来自微信
+ */
+function checkSignature($query) {
+  $signature = $query['signature'];
+  $timestamp = $query['timestamp'];
+  $nonce = $query['nonce'];
+
+  $token = variable_get('weixintest_token','');
+  $tmpArr = array($token, $timestamp, $nonce);
+  sort($tmpArr, SORT_STRING);
+  $tmpStr = implode( $tmpArr );
+  $tmpStr = sha1( $tmpStr );
+
+  if ($tmpStr == $signature) {
+    return true;
+  }
+  else {
+    return false;
+  }
+}
+
+/**
+ * 回应信息
+ */
+function responseMsg() {
+//获取post数据，xml
+$postStr = $GLOBALS["HTTP_RAW_POST_DATA"];
+
+//处理数据
+if (!empty($postStr)){
+  $postObj = simplexml_load_string($postStr, 'SimpleXMLElement', LIBXML_NOCDATA);
+  $fromUsername = $postObj->FromUserName;
+  $toUsername = $postObj->ToUserName;
+  $getMsgType = $postObj->MsgType;
+  $time = time();
+  $msgType = 'text';
+  $textTpl = '<xml>
+    <ToUserName><![CDATA[%s]]></ToUserName>
+    <FromUserName><![CDATA[%s]]></FromUserName>
+    <CreateTime>%s</CreateTime>
+    <MsgType><![CDATA[%s]]></MsgType>
+    <Content><![CDATA[%s]]></Content>
+    </xml>';
+
+  switch ($getMsgType) {
+    case 'text':
+      $keyword = $postObj->Content;
+	  //$contentStr = 'hello' . $keyword;
+      $contentStr = weixintest_get_content($keyword, $msgType, $textTpl);
+      break;
+
+    case 'voice':
+      $keyword = $postObj->Recognition;
+      $contentStr = weixintest_get_content($keyword, $msgType, $textTpl);
+      break;
+
+    case 'event':
+      if ($postObj->Event == 'subscribe') {
+        $contentStr = variable_get('weixintest_greeting');
+      }
+      else {
+        print '';
+        exit;
+      }
+      break;
+
+    default:
+      $contentStr = variable_get('weixintest_noindentify');
+      break;
+  }
+  $resultStr = sprintf($textTpl, $fromUsername, $toUsername, $time, $msgType, $contentStr);
+  print $resultStr;
+}
+else {
+    print '';
+    exit;
+  }
+}
+
+/**
+ * 根据关键字搜索内容
+ */
+function weixintest_get_content($keyword, &$msgType, &$textTpl) {
+  //默认搜索node
+  $search_type = 'node';
+
+  $select_types = variable_get('weixintest_node_types', array());
+  foreach ($select_types as $key => $value) {
+    if ($value == '0') {
+      unset($select_types[$key]);
+    }
+  }
+  $types_string = count($select_types) > 0 ? ' type:' . implode(',', $select_types) : '';
+
+  //drupal7使用：$searchResults = module_invoke('search', 'data', $keyword . $types_string, $search_type);
+  $searchResults = do_search($keyword . $types_string, $search_type); 
+  $count_results = count($searchResults);
+  if ($count_results > 0) {
+    $msgType = 'news';
+    $textTpl = '<xml>
+      <ToUserName><![CDATA[%s]]></ToUserName>
+      <FromUserName><![CDATA[%s]]></FromUserName>
+      <CreateTime>%s</CreateTime>
+      <MsgType><![CDATA[%s]]></MsgType>
+      %s
+      </xml>';
+    $output = '<ArticleCount>' . $count_results . '</ArticleCount>';
+    $output .= '<Articles>';
+    //只放标题和链接 最多10条记录
+    $itemTpl = '<item>
+      <Title><![CDATA[%s]]></Title>
+      <Url><![CDATA[%s]]></Url>
+      </item>';
+    foreach($searchResults as $result){
+		//the 'sid' is actually a node id.
+		$nid = $result->sid;
+		//do whatever you want with the node ID
+		$node = node_load($nid);
+		
+		$title = $node->title;
+		$link = $_SERVER['HTTP_HOST'] . url('node/'.$nid);
+		$output .= sprintf($itemTpl, $title, $link);
+	}
+    $output .= '</Articles>';
+  }
+  else {
+    $output = variable_get('weixintest_noresult');
+  }
+  return $output;
+} 

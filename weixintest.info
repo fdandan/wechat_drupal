@@ -1,0 +1,8 @@
+name = weixintest
+description = 微信订阅号
+core = 6.x
+
+package = Test
+dependencies[] = search
+
+configure = admin/settings/weixintest
